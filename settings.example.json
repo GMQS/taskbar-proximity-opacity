@@ -1,0 +1,7 @@
+{
+  "FadeDistanceRatio": 0.35,
+  "FadeDurationMs": 100,
+  "FarOpacityPercent": 0,
+  "StartWithWindows": false,
+  "DisabledDisplays": []
+}
