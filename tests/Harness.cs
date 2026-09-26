@@ -3,9 +3,13 @@ using TaskbarProximityOpacity;
 internal static class Harness
 {
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        if (args.Contains("--blur-demo")) { BlurDemo.Run(); return; }
+        try { BlurChecks.Run(Check); }
+        catch (Exception ex) { Console.WriteLine(ex); Environment.ExitCode = 1; }
+        if (args.Contains("--blur-only")) return;
         string journal = Path.Combine(AppContext.BaseDirectory, "work-area-test.json");
         var controller = new WorkAreaController(journal);
         try

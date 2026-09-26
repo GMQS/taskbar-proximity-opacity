@@ -174,6 +174,9 @@ internal sealed class TaskbarController : IDisposable
     private readonly Dictionary<nint, TaskbarState> _taskbars = new();
     private readonly Dictionary<nint, byte> _currentOpacity = new();
     private readonly WorkAreaController _workAreas = new();
+    private readonly TaskbarBlur _blur = new();
+    private bool _transparencyEnabled = TransparencyPreference.Read();
+    private long _lastAppearanceScan = -1000;
     private long _lastWorkAreaScan = -1000;
     private Point _lastCursor = new(int.MinValue, int.MinValue);
     private long _lastTopologyScan;
@@ -187,7 +190,10 @@ internal sealed class TaskbarController : IDisposable
         set
         {
             _paused = value;
+            _lastCursor = new Point(int.MinValue, int.MinValue);
+            _lastAppearanceScan = -1000;
             if (!value) return;
+            _blur.Dispose();
             _workAreas.RestoreAll();
             foreach (var state in _taskbars.Values)
             {
@@ -214,12 +220,19 @@ internal sealed class TaskbarController : IDisposable
         _lastCursor = new Point(int.MinValue, int.MinValue);
         _workAreas.RestoreAll();
         _lastWorkAreaScan = -1000;
+        _lastAppearanceScan = -1000;
     }
 
     private void Tick()
     {
         if (Paused) return;
         long now = _clock.ElapsedMilliseconds;
+        bool refreshAppearance = now - _lastAppearanceScan >= 1000;
+        if (refreshAppearance)
+        {
+            _transparencyEnabled = TransparencyPreference.Read(_transparencyEnabled);
+            _lastAppearanceScan = now;
+        }
         if (now - _lastWorkAreaScan >= 1000)
         {
             _workAreas.Update(_taskbars.Values
@@ -236,7 +249,7 @@ internal sealed class TaskbarController : IDisposable
         if (!Native.GetCursorPos(out var point)) return;
         bool cursorMoved = _lastCursor != point;
         _lastCursor = point;
-        if (!cursorMoved) return;
+        if (!cursorMoved && !refreshAppearance) return;
 
         foreach (var pair in _taskbars.ToArray())
         {
@@ -248,6 +261,7 @@ internal sealed class TaskbarController : IDisposable
             byte target = enabled ? CalculateOpacity(point, state) : (byte)255;
             if (!_currentOpacity.TryGetValue(hwnd, out var current)) current = state.OriginalAlpha;
             if (target != current && ApplyOpacity(hwnd, target, state.OriginalExStyle)) _currentOpacity[hwnd] = target;
+            _blur.Apply(hwnd, state.Bounds, _currentOpacity.GetValueOrDefault(hwnd, current), enabled && _transparencyEnabled);
         }
     }
 
@@ -308,6 +322,8 @@ internal sealed class TaskbarController : IDisposable
 
         _taskbars.Clear();
         foreach (var pair in found) _taskbars[pair.Key] = pair.Value;
+        _blur.Retain(found.Keys);
+        _lastCursor = new Point(int.MinValue, int.MinValue);
         if (addedTaskbar) SaveRecovery();
     }
 
@@ -390,6 +406,7 @@ internal sealed class TaskbarController : IDisposable
     {
         _timer.Stop();
         _timer.Dispose();
+        _blur.Dispose();
         _workAreas.RestoreAll();
         foreach (var state in _taskbars.Values)
         {
