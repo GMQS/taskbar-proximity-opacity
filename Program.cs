@@ -173,6 +173,8 @@ internal sealed class TaskbarController : IDisposable
     private readonly System.Windows.Forms.Timer _timer;
     private readonly Dictionary<nint, TaskbarState> _taskbars = new();
     private readonly Dictionary<nint, byte> _currentOpacity = new();
+    private readonly WorkAreaController _workAreas = new();
+    private long _lastWorkAreaScan = -1000;
     private Point _lastCursor = new(int.MinValue, int.MinValue);
     private long _lastTopologyScan;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
@@ -186,6 +188,7 @@ internal sealed class TaskbarController : IDisposable
         {
             _paused = value;
             if (!value) return;
+            _workAreas.RestoreAll();
             foreach (var state in _taskbars.Values)
             {
                 if (Native.IsWindow(state.Hwnd) && ApplyOpacity(state.Hwnd, 255, state.OriginalExStyle))
@@ -209,12 +212,21 @@ internal sealed class TaskbarController : IDisposable
     {
         Settings = settings;
         _lastCursor = new Point(int.MinValue, int.MinValue);
+        _workAreas.RestoreAll();
+        _lastWorkAreaScan = -1000;
     }
 
     private void Tick()
     {
         if (Paused) return;
         long now = _clock.ElapsedMilliseconds;
+        if (now - _lastWorkAreaScan >= 1000)
+        {
+            _workAreas.Update(_taskbars.Values
+                .Where(s => !Settings.DisabledDisplays.Contains(s.Display.DeviceName, StringComparer.OrdinalIgnoreCase))
+                .Select(s => s.Display.Monitor).ToHashSet());
+            _lastWorkAreaScan = now;
+        }
         if (now - _lastTopologyScan >= 2000)
         {
             RefreshTaskbars();
@@ -378,6 +390,7 @@ internal sealed class TaskbarController : IDisposable
     {
         _timer.Stop();
         _timer.Dispose();
+        _workAreas.RestoreAll();
         foreach (var state in _taskbars.Values)
         {
             if (Native.IsWindow(state.Hwnd))

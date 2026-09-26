@@ -12,5 +12,6 @@
     <PublishSingleFile>false</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifact/**;tests/**</DefaultItemExcludes>
   </PropertyGroup>
 </Project>

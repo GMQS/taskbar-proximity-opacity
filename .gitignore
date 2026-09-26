@@ -1,1 +1,3 @@
 /artifact
+**/bin/
+**/obj/

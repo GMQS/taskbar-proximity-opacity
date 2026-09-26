@@ -9,6 +9,7 @@ Windows taskbar opacity follows the mouse distance independently on each display
 - Independent calculations for every monitor that has a taskbar. Turn on **Show my taskbar on all displays** in Windows settings to have a taskbar on each display.
 - Settings window for distance range, far opacity, per-display enable/disable, and optional startup.
 - Tray menu to pause or exit. A paused taskbar is restored to full opacity.
+- Maximized windows on enabled displays use the entire screen, including the taskbar area. The utility temporarily expands each enabled display's Windows work area; this also affects snapping and other apps that use that area. Pause, exit, or disabling a display restores its previous work area. Changes are checked every second, independently of cursor movement. A recovery file restores work areas on the next launch after a forced termination. Already-maximized windows may need to be restored and maximized again when starting or pausing the utility.
 - Settings live in `%LOCALAPPDATA%\TaskbarProximityOpacity\settings.json`.
 
 The distance uses the shortest distance from the cursor to that monitor's taskbar rectangle. Opacity is applied directly from the current distance, without time-based animation. The distance range is a percentage of the display dimension perpendicular to the taskbar, so it scales with resolution and rotation. At or beyond the configured range, opacity is zero by default. The calculation is independent for each display.
@@ -48,6 +49,11 @@ This is a portable tray utility; there is no installer. Keep the generated `.exe
 
 ## Performance notes
 
-The utility samples the cursor every 30 ms, but skips work when the cursor has not moved. It writes a new taskbar opacity only when the value changes. It creates no screen-sized overlay and performs no per-frame rendering. A borderless game may still cause opacity writes while the cursor moves through the distance range; the tray menu can pause updates and restore full opacity.
+The utility samples the cursor every 30 ms, but skips opacity work when the cursor has not moved. It writes a new taskbar opacity only when the value changes. It creates no screen-sized overlay and performs no per-frame rendering. A borderless game may still cause opacity writes while the cursor moves through the distance range; the tray menu can pause updates and restore full opacity.
 
 Windows taskbar window classes and layering are implementation details, so a future Windows update can change behavior. The app does not relocate taskbars or toggle Windows auto-hide.
+
+
+## Verification
+
+Run `dotnet run --project tests/Validation.csproj -c Release` on Windows with .NET 10. This integration test briefly changes each display''s work area and opens a test window, then restores the original work areas in a finally block. It checks maximization, disabled displays, repeat updates, restoration, and recovery from the journal.
