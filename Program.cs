@@ -110,7 +110,6 @@ internal sealed class TrayContext : ApplicationContext
 internal sealed class SettingsForm : Form
 {
     private readonly NumericUpDown _distance;
-    private readonly NumericUpDown _visibleOpacity;
     private readonly NumericUpDown _idleDelay;
     private readonly CheckBox _startup;
     private readonly CheckedListBox _monitors;
@@ -124,9 +123,9 @@ internal sealed class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(490, 390);
+        ClientSize = new Size(490, 350);
 
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 2, RowCount = 7 };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 2, RowCount = 6 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
         Controls.Add(layout);
@@ -134,16 +133,12 @@ internal sealed class SettingsForm : Form
         layout.Controls.Add(new Label { Text = "透過を開始する距離（タスクバーと垂直な画面寸法の %）", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
         _distance = Number(1, 100, (decimal)(settings.FadeDistanceRatio * 100), 1);
         layout.Controls.Add(_distance, 1, 0);
-        layout.Controls.Add(new Label { Text = "カーソルが遠い時の不透明度 (%)", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
-        _visibleOpacity = Number(0, 40, settings.FarOpacityPercent, 1);
-        layout.Controls.Add(_visibleOpacity, 1, 1);
-
-        layout.Controls.Add(new Label { Text = "タスクバー上で停止してから消えるまで（秒）", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
+        layout.Controls.Add(new Label { Text = "表示範囲内で停止してから消えるまで（秒）", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
         _idleDelay = Number(0.1m, 60, settings.IdleDelayMilliseconds / 1000m, 0.1m);
         _idleDelay.DecimalPlaces = 1;
-        layout.Controls.Add(_idleDelay, 1, 2);
+        layout.Controls.Add(_idleDelay, 1, 1);
 
-        layout.Controls.Add(new Label { Text = "制御するディスプレイ", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
+        layout.Controls.Add(new Label { Text = "制御するディスプレイ", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
         _monitors = new CheckedListBox { CheckOnClick = true, Height = 150, Dock = DockStyle.Fill };
         foreach (var display in MonitorCatalog.GetDisplays())
         {
@@ -151,11 +146,11 @@ internal sealed class SettingsForm : Form
             _monitors.Items.Add(new MonitorChoice(display), enabled);
         }
         layout.SetColumnSpan(_monitors, 2);
-        layout.Controls.Add(_monitors, 0, 4);
+        layout.Controls.Add(_monitors, 0, 3);
 
         _startup = new CheckBox { Text = "Windowsへのサインイン時に起動", AutoSize = true, Checked = settings.StartWithWindows, Anchor = AnchorStyles.Left };
         layout.SetColumnSpan(_startup, 2);
-        layout.Controls.Add(_startup, 0, 5);
+        layout.Controls.Add(_startup, 0, 4);
 
         var buttons = new FlowLayoutPanel { FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Fill };
         var ok = new Button { Text = "保存", DialogResult = DialogResult.OK, Width = 90 };
@@ -164,7 +159,7 @@ internal sealed class SettingsForm : Form
         buttons.Controls.Add(ok);
         buttons.Controls.Add(cancel);
         layout.SetColumnSpan(buttons, 2);
-        layout.Controls.Add(buttons, 0, 6);
+        layout.Controls.Add(buttons, 0, 5);
         AcceptButton = ok;
         CancelButton = cancel;
     }
@@ -172,7 +167,6 @@ internal sealed class SettingsForm : Form
     private void CollectSettings()
     {
         Result.FadeDistanceRatio = (double)_distance.Value / 100.0;
-        Result.FarOpacityPercent = (int)_visibleOpacity.Value;
         Result.IdleDelayMilliseconds = (int)(_idleDelay.Value * 1000);
         Result.StartWithWindows = _startup.Checked;
         Result.DisabledDisplays = _monitors.Items.Cast<MonitorChoice>()
@@ -274,7 +268,7 @@ internal sealed class TaskbarController : IDisposable
         _lastCursor = point;
         bool idleDue = now - _lastMovementAt >= Math.Clamp(Settings.IdleDelayMilliseconds, 100, 60000);
         bool idleTransitionDue = idleDue && _taskbars.Values.Any(state =>
-            state.Bounds.Contains(point) && !_idleTaskbars.Contains(state.Hwnd) &&
+            CalculateOpacity(point, state) > 0 && !_idleTaskbars.Contains(state.Hwnd) &&
             !Settings.DisabledDisplays.Contains(state.Display.DeviceName, StringComparer.OrdinalIgnoreCase));
         if (!cursorMoved && !refreshAppearance && !refreshTopology &&
             _fadeTransitions.Count == 0 && !idleTransitionDue) return;
@@ -293,8 +287,9 @@ internal sealed class TaskbarController : IDisposable
             }
 
             bool enabled = !Settings.DisabledDisplays.Contains(state.Display.DeviceName, StringComparer.OrdinalIgnoreCase);
-            bool idle = enabled && state.Bounds.Contains(point) && idleDue;
-            byte target = enabled ? (idle ? (byte)0 : CalculateOpacity(point, state)) : (byte)255;
+            byte normalOpacity = enabled ? CalculateOpacity(point, state) : (byte)255;
+            bool idle = enabled && normalOpacity > 0 && idleDue;
+            byte target = idle ? (byte)0 : normalOpacity;
             if (!_currentOpacity.TryGetValue(hwnd, out var current)) current = state.OriginalAlpha;
             if (idle != _idleTaskbars.Contains(hwnd))
             {
@@ -326,8 +321,7 @@ internal sealed class TaskbarController : IDisposable
         double progress = Math.Clamp(1.0 - distance / range, 0, 1);
         // Bring the taskbar up to a perceptible opacity early in the approach.
         progress = Math.Pow(progress, 0.65);
-        double farAlpha = Settings.FarOpacityPercent / 100.0;
-        return (byte)Math.Clamp(Math.Round(255 * (farAlpha + (1 - farAlpha) * progress)), 0, 255);
+        return (byte)Math.Clamp(Math.Round(255 * progress), 0, 255);
     }
 
     private void RefreshTaskbars()
@@ -523,14 +517,12 @@ internal sealed class TaskbarController : IDisposable
 internal sealed class AppSettings
 {
     public double FadeDistanceRatio { get; set; } = 0.35;
-    public int FarOpacityPercent { get; set; }
     public int IdleDelayMilliseconds { get; set; } = 2000;
     public bool StartWithWindows { get; set; }
     public List<string> DisabledDisplays { get; set; } = [];
     public AppSettings Clone() => new()
     {
         FadeDistanceRatio = FadeDistanceRatio,
-        FarOpacityPercent = FarOpacityPercent,
         IdleDelayMilliseconds = IdleDelayMilliseconds,
         StartWithWindows = StartWithWindows,
         DisabledDisplays = [.. DisabledDisplays]

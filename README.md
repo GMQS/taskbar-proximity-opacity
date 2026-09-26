@@ -7,12 +7,12 @@ Windows taskbar opacity follows the mouse distance independently on each display
 - Windows 11, x64.
 - The standard primary and secondary Windows taskbars.
 - Independent calculations for every monitor that has a taskbar. Turn on **Show my taskbar on all displays** in Windows settings to have a taskbar on each display.
-- Settings window for distance range, far opacity, taskbar idle delay, per-display enable/disable, and optional startup.
+- Settings window for distance range, cursor idle delay, per-display enable/disable, and optional startup.
 - Tray menu to pause or exit. A paused taskbar is restored to full opacity.
 - Follows **Windows Settings > Personalization > Colors > Transparency effects** without changing that setting. When ON, a native acrylic surface behind each enabled taskbar blurs the background while the taskbar remains visible; OFF keeps the existing opacity-only behavior. Changes are picked up within about one second, even with a stationary cursor. High contrast disables the added blur. Full transparency, pause, disabling a display, and exit remove the blur surface.
 - Settings live in `%LOCALAPPDATA%\TaskbarProximityOpacity\settings.json`.
 
-The distance uses the shortest distance from the cursor to that monitor's taskbar rectangle. The distance range is a percentage of the display dimension perpendicular to the taskbar, so it scales with resolution and rotation. At or beyond the configured range, opacity is zero by default. When the cursor stops inside a taskbar for the configured delay, that taskbar fades out over 250 ms. Moving the cursor again fades it back in over 250 ms to the opacity for its current position. Other distance-based opacity changes remain immediate. The calculation is independent for each display.
+The distance uses the shortest distance from the cursor to that monitor's taskbar rectangle. The distance range is a percentage of the display dimension perpendicular to the taskbar, so it scales with resolution and rotation. At or beyond the configured range, opacity is always zero. When the cursor stops anywhere in the range where the taskbar has nonzero opacity for the configured delay, that taskbar fades out over 250 ms. Moving the cursor again fades it back in over 250 ms to the opacity for its current position. Other distance-based opacity changes remain immediate. The calculation is independent for each display.
 
 ## Build and run
 
@@ -41,14 +41,13 @@ The app creates its JSON settings after saving in the settings window. Distance 
 ```json
 {
   "FadeDistanceRatio": 0.35,
-  "FarOpacityPercent": 0,
   "IdleDelayMilliseconds": 2000,
   "StartWithWindows": false,
   "DisabledDisplays": []
 }
 ```
 
-`FadeDistanceRatio` is a fraction: `0.35` means 35% of the display dimension perpendicular to the taskbar. Values supported by the settings UI are 0.01–1.00. `FarOpacityPercent` can be 0–40; use 0 for complete transparency. `IdleDelayMilliseconds` sets the stationary delay and can be changed in the settings window from 0.1 to 60 seconds.
+`FadeDistanceRatio` is a fraction: `0.35` means 35% of the display dimension perpendicular to the taskbar. Values supported by the settings UI are 0.01–1.00. `IdleDelayMilliseconds` sets the stationary delay and can be changed in the settings window from 0.1 to 60 seconds. An older settings file may still contain `FarOpacityPercent`; the app ignores it and removes it the next time settings are saved.
 
 ## Install and remove
 
