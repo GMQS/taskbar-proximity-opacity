@@ -24,9 +24,12 @@ internal static class Program
 
 internal sealed class TrayContext : ApplicationContext
 {
+    internal const string BuildExitEventName = "Local\\TaskbarProximityOpacity.BuildExit";
     private readonly TaskbarController _controller;
     private readonly NotifyIcon _tray;
     private readonly ToolStripMenuItem _pauseItem;
+    private readonly EventWaitHandle _buildExitEvent;
+    private readonly System.Windows.Forms.Timer _buildExitTimer;
 
     public TrayContext()
     {
@@ -55,6 +58,14 @@ internal sealed class TrayContext : ApplicationContext
             Visible = true
         };
         _tray.DoubleClick += (_, _) => OpenSettings();
+
+        _buildExitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, BuildExitEventName);
+        _buildExitTimer = new System.Windows.Forms.Timer { Interval = 250 };
+        _buildExitTimer.Tick += (_, _) =>
+        {
+            if (_buildExitEvent.WaitOne(0)) ExitThread();
+        };
+        _buildExitTimer.Start();
     }
 
     private void OpenSettings()
@@ -86,6 +97,9 @@ internal sealed class TrayContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
+        _buildExitTimer.Stop();
+        _buildExitTimer.Dispose();
+        _buildExitEvent.Dispose();
         _controller.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
@@ -97,6 +111,7 @@ internal sealed class SettingsForm : Form
 {
     private readonly NumericUpDown _distance;
     private readonly NumericUpDown _visibleOpacity;
+    private readonly NumericUpDown _idleDelay;
     private readonly CheckBox _startup;
     private readonly CheckedListBox _monitors;
     public AppSettings Result { get; private set; }
@@ -109,9 +124,9 @@ internal sealed class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(490, 350);
+        ClientSize = new Size(490, 390);
 
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 2, RowCount = 6 };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 2, RowCount = 7 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
         Controls.Add(layout);
@@ -123,7 +138,12 @@ internal sealed class SettingsForm : Form
         _visibleOpacity = Number(0, 40, settings.FarOpacityPercent, 1);
         layout.Controls.Add(_visibleOpacity, 1, 1);
 
-        layout.Controls.Add(new Label { Text = "制御するディスプレイ", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
+        layout.Controls.Add(new Label { Text = "タスクバー上で停止してから消えるまで（秒）", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
+        _idleDelay = Number(0.1m, 60, settings.IdleDelayMilliseconds / 1000m, 0.1m);
+        _idleDelay.DecimalPlaces = 1;
+        layout.Controls.Add(_idleDelay, 1, 2);
+
+        layout.Controls.Add(new Label { Text = "制御するディスプレイ", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
         _monitors = new CheckedListBox { CheckOnClick = true, Height = 150, Dock = DockStyle.Fill };
         foreach (var display in MonitorCatalog.GetDisplays())
         {
@@ -131,11 +151,11 @@ internal sealed class SettingsForm : Form
             _monitors.Items.Add(new MonitorChoice(display), enabled);
         }
         layout.SetColumnSpan(_monitors, 2);
-        layout.Controls.Add(_monitors, 0, 3);
+        layout.Controls.Add(_monitors, 0, 4);
 
         _startup = new CheckBox { Text = "Windowsへのサインイン時に起動", AutoSize = true, Checked = settings.StartWithWindows, Anchor = AnchorStyles.Left };
         layout.SetColumnSpan(_startup, 2);
-        layout.Controls.Add(_startup, 0, 4);
+        layout.Controls.Add(_startup, 0, 5);
 
         var buttons = new FlowLayoutPanel { FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Fill };
         var ok = new Button { Text = "保存", DialogResult = DialogResult.OK, Width = 90 };
@@ -144,7 +164,7 @@ internal sealed class SettingsForm : Form
         buttons.Controls.Add(ok);
         buttons.Controls.Add(cancel);
         layout.SetColumnSpan(buttons, 2);
-        layout.Controls.Add(buttons, 0, 5);
+        layout.Controls.Add(buttons, 0, 6);
         AcceptButton = ok;
         CancelButton = cancel;
     }
@@ -153,6 +173,7 @@ internal sealed class SettingsForm : Form
     {
         Result.FadeDistanceRatio = (double)_distance.Value / 100.0;
         Result.FarOpacityPercent = (int)_visibleOpacity.Value;
+        Result.IdleDelayMilliseconds = (int)(_idleDelay.Value * 1000);
         Result.StartWithWindows = _startup.Checked;
         Result.DisabledDisplays = _monitors.Items.Cast<MonitorChoice>()
             .Where((_, index) => !_monitors.GetItemChecked(index))
@@ -173,10 +194,15 @@ internal sealed class TaskbarController : IDisposable
     private readonly System.Windows.Forms.Timer _timer;
     private readonly Dictionary<nint, TaskbarState> _taskbars = new();
     private readonly Dictionary<nint, byte> _currentOpacity = new();
+    private readonly HashSet<nint> _idleTaskbars = [];
+    private readonly Dictionary<nint, FadeTransition> _fadeTransitions = new();
     private readonly TaskbarBlur _blur = new();
+    private const int FadeDurationMilliseconds = 250;
     private bool _transparencyEnabled = TransparencyPreference.Read();
     private long _lastAppearanceScan = -1000;
     private Point _lastCursor = new(int.MinValue, int.MinValue);
+    private long _lastMovementAt;
+    private bool _hasCursorSample;
     private long _lastTopologyScan;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
 
@@ -189,6 +215,9 @@ internal sealed class TaskbarController : IDisposable
         {
             _paused = value;
             _lastCursor = new Point(int.MinValue, int.MinValue);
+            _hasCursorSample = false;
+            _idleTaskbars.Clear();
+            _fadeTransitions.Clear();
             _lastAppearanceScan = -1000;
             if (!value) return;
             _blur.Dispose();
@@ -215,6 +244,9 @@ internal sealed class TaskbarController : IDisposable
     {
         Settings = settings;
         _lastCursor = new Point(int.MinValue, int.MinValue);
+        _hasCursorSample = false;
+        _idleTaskbars.Clear();
+        _fadeTransitions.Clear();
         _lastAppearanceScan = -1000;
     }
 
@@ -228,30 +260,60 @@ internal sealed class TaskbarController : IDisposable
             _transparencyEnabled = TransparencyPreference.Read(_transparencyEnabled);
             _lastAppearanceScan = now;
         }
-        if (now - _lastTopologyScan >= 2000)
+        bool refreshTopology = now - _lastTopologyScan >= 2000;
+        if (refreshTopology)
         {
             RefreshTaskbars();
             _lastTopologyScan = now;
         }
 
         if (!Native.GetCursorPos(out var point)) return;
-        bool cursorMoved = _lastCursor != point;
+        bool cursorMoved = !_hasCursorSample || _lastCursor != point;
+        if (cursorMoved) _lastMovementAt = now;
+        _hasCursorSample = true;
         _lastCursor = point;
-        if (!cursorMoved && !refreshAppearance) return;
+        bool idleDue = now - _lastMovementAt >= Math.Clamp(Settings.IdleDelayMilliseconds, 100, 60000);
+        bool idleTransitionDue = idleDue && _taskbars.Values.Any(state =>
+            state.Bounds.Contains(point) && !_idleTaskbars.Contains(state.Hwnd) &&
+            !Settings.DisabledDisplays.Contains(state.Display.DeviceName, StringComparer.OrdinalIgnoreCase));
+        if (!cursorMoved && !refreshAppearance && !refreshTopology &&
+            _fadeTransitions.Count == 0 && !idleTransitionDue) return;
 
         foreach (var pair in _taskbars.ToArray())
         {
             var hwnd = pair.Key;
             var state = pair.Value;
-            if (!Native.IsWindow(hwnd)) { _taskbars.Remove(hwnd); _currentOpacity.Remove(hwnd); continue; }
+            if (!Native.IsWindow(hwnd))
+            {
+                _taskbars.Remove(hwnd);
+                _currentOpacity.Remove(hwnd);
+                _idleTaskbars.Remove(hwnd);
+                _fadeTransitions.Remove(hwnd);
+                continue;
+            }
 
             bool enabled = !Settings.DisabledDisplays.Contains(state.Display.DeviceName, StringComparer.OrdinalIgnoreCase);
-            byte target = enabled ? CalculateOpacity(point, state) : (byte)255;
+            bool idle = enabled && state.Bounds.Contains(point) && idleDue;
+            byte target = enabled ? (idle ? (byte)0 : CalculateOpacity(point, state)) : (byte)255;
             if (!_currentOpacity.TryGetValue(hwnd, out var current)) current = state.OriginalAlpha;
+            if (idle != _idleTaskbars.Contains(hwnd))
+            {
+                if (idle) _idleTaskbars.Add(hwnd);
+                else _idleTaskbars.Remove(hwnd);
+                _fadeTransitions[hwnd] = new FadeTransition(current, now);
+            }
+            if (_fadeTransitions.TryGetValue(hwnd, out var fade))
+            {
+                double progress = Math.Clamp((double)(now - fade.StartTime) / FadeDurationMilliseconds, 0, 1);
+                target = (byte)Math.Clamp(Math.Round(fade.StartOpacity + (target - fade.StartOpacity) * progress), 0, 255);
+                if (progress >= 1) _fadeTransitions.Remove(hwnd);
+            }
             if (target != current && ApplyOpacity(hwnd, target, state.OriginalExStyle)) _currentOpacity[hwnd] = target;
             _blur.Apply(hwnd, state.Bounds, _currentOpacity.GetValueOrDefault(hwnd, current), enabled && _transparencyEnabled);
         }
     }
+
+    private readonly record struct FadeTransition(byte StartOpacity, long StartTime);
 
     private byte CalculateOpacity(Point cursor, TaskbarState state)
     {
@@ -310,8 +372,10 @@ internal sealed class TaskbarController : IDisposable
 
         _taskbars.Clear();
         foreach (var pair in found) _taskbars[pair.Key] = pair.Value;
+        _idleTaskbars.RemoveWhere(hwnd => !found.ContainsKey(hwnd));
+        foreach (var hwnd in _fadeTransitions.Keys.Where(hwnd => !found.ContainsKey(hwnd)).ToArray())
+            _fadeTransitions.Remove(hwnd);
         _blur.Retain(found.Keys);
-        _lastCursor = new Point(int.MinValue, int.MinValue);
         if (addedTaskbar) SaveRecovery();
     }
 
@@ -460,12 +524,14 @@ internal sealed class AppSettings
 {
     public double FadeDistanceRatio { get; set; } = 0.35;
     public int FarOpacityPercent { get; set; }
+    public int IdleDelayMilliseconds { get; set; } = 2000;
     public bool StartWithWindows { get; set; }
     public List<string> DisabledDisplays { get; set; } = [];
     public AppSettings Clone() => new()
     {
         FadeDistanceRatio = FadeDistanceRatio,
         FarOpacityPercent = FarOpacityPercent,
+        IdleDelayMilliseconds = IdleDelayMilliseconds,
         StartWithWindows = StartWithWindows,
         DisabledDisplays = [.. DisabledDisplays]
     };
