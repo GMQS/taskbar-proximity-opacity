@@ -10,7 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Program.cs" />
-    <Compile Include="../WorkAreaController.cs" />
     <Compile Include="../TaskbarBlur.cs" />
   </ItemGroup>
 </Project>

@@ -10,23 +10,28 @@ Windows taskbar opacity follows the mouse distance independently on each display
 - Settings window for distance range, far opacity, per-display enable/disable, and optional startup.
 - Tray menu to pause or exit. A paused taskbar is restored to full opacity.
 - Follows **Windows Settings > Personalization > Colors > Transparency effects** without changing that setting. When ON, a native acrylic surface behind each enabled taskbar blurs the background while the taskbar remains visible; OFF keeps the existing opacity-only behavior. Changes are picked up within about one second, even with a stationary cursor. High contrast disables the added blur. Full transparency, pause, disabling a display, and exit remove the blur surface.
-- Maximized windows on enabled displays use the entire screen, including the taskbar area. The utility temporarily expands each enabled display's Windows work area; this also affects snapping and other apps that use that area. Pause, exit, or disabling a display restores its previous work area. Changes are checked every second, independently of cursor movement. A recovery file restores work areas on the next launch after a forced termination. Already-maximized windows may need to be restored and maximized again when starting or pausing the utility.
 - Settings live in `%LOCALAPPDATA%\TaskbarProximityOpacity\settings.json`.
 
 The distance uses the shortest distance from the cursor to that monitor's taskbar rectangle. Opacity is applied directly from the current distance, without time-based animation. The distance range is a percentage of the display dimension perpendicular to the taskbar, so it scales with resolution and rotation. At or beyond the configured range, opacity is zero by default. The calculation is independent for each display.
 
 ## Build and run
 
-Requires the .NET 10 Windows Desktop Runtime. Build with:
+Requires the .NET 10 Windows Desktop Runtime. To prepare the pinned .NET 10 SDK in this project (no administrator rights required), run once:
 
 ```powershell
-dotnet build .\TaskbarProximityOpacity.csproj -c Release -o .\artifact
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-dotnet.ps1
+```
+
+The SDK is installed in `.dotnet` and can be restored by running the script again. Build with:
+
+```powershell
+.\.dotnet\dotnet.exe build .\TaskbarProximityOpacity.csproj -c Release -o .\artifact
 ```
 
 Run `artifact\TaskbarProximityOpacity.exe`. To make a self-contained single-file package on a machine with NuGet access, publish to `artifact\publish`:
 
 ```powershell
-dotnet publish .\TaskbarProximityOpacity.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\artifact\publish
+.\.dotnet\dotnet.exe publish .\TaskbarProximityOpacity.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\artifact\publish
 ```
 
 ## Settings file
@@ -57,4 +62,4 @@ Windows taskbar window classes, layering, and the acrylic composition API are im
 
 ## Verification
 
-Run `dotnet run --project tests/Validation.csproj -c Release` on Windows with .NET 10. This integration test briefly changes each display's work area and opens test windows, then restores the original work areas in a finally block. It checks maximization, disabled displays, repeat updates, restoration, recovery from the journal, and blur surface lifecycle, placement, and focus. Use `-- --blur-only` to skip work-area tests, or `-- --blur-demo` for a visual striped-background blur check (closes automatically after two minutes).
+Run `.\.dotnet\dotnet.exe run --project tests/Validation.csproj -c Release` on Windows to check blur surface lifecycle, placement, and focus. Use `-- --blur-demo` for a visual striped-background blur check (closes automatically after two minutes).
