@@ -9,6 +9,7 @@ Windows taskbar opacity follows the mouse distance independently on each display
 - Independent calculations for every monitor that has a taskbar. Turn on **Show my taskbar on all displays** in Windows settings to have a taskbar on each display.
 - Settings window for distance range, cursor idle delay, per-display enable/disable, and optional startup.
 - Tray menu to pause or exit. A paused taskbar is restored to full opacity.
+- While a controlled taskbar is fully transparent, maximized windows may use its former screen area. Already-maximized windows on that display expand over about 250 ms and shrink over about 400 ms, without requiring focus. During shrinking, the window may briefly overlap the visible taskbar; the normal work area is restored after the shrink finishes. On exit, restoration is immediate. If Windows resets the work area itself, the utility waits for the next visible-to-hidden transition instead of repeatedly changing it.
 - Follows **Windows Settings > Personalization > Colors > Transparency effects** without changing that setting. When ON, a native acrylic surface behind each enabled taskbar blurs the background while the taskbar remains visible; OFF keeps the existing opacity-only behavior. Changes are picked up within about one second, even with a stationary cursor. High contrast disables the added blur. Full transparency, pause, disabling a display, and exit remove the blur surface.
 - Settings live in `%LOCALAPPDATA%\TaskbarProximityOpacity\settings.json`.
 
@@ -55,9 +56,9 @@ This is a portable tray utility; there is no installer. Keep the generated `.exe
 
 ## Performance notes
 
-The utility samples the cursor every 30 ms and writes taskbar opacity only when the value changes. With transparency effects enabled, it creates one taskbar-sized acrylic surface immediately below each visible controlled taskbar. The surfaces do not activate or cover taskbar icons, and Windows handles the blur rendering. Acrylic cannot be alpha-faded with layered windows on Windows 11: blur strength is constant while the taskbar is visible and the surface is removed at zero opacity. A borderless game may still cause opacity writes while the cursor moves through the distance range; the tray menu can pause updates and restore full opacity.
+The utility samples the cursor every 30 ms and writes taskbar opacity only when the value changes. It changes a monitor's Windows work area only when its taskbar crosses between fully transparent and visible, and restores the previous area on pause or exit. With transparency effects enabled, it creates one taskbar-sized acrylic surface immediately below each visible controlled taskbar. The surfaces do not activate or cover taskbar icons, and Windows handles the blur rendering. Acrylic cannot be alpha-faded with layered windows on Windows 11: blur strength is constant while the taskbar is visible and the surface is removed at zero opacity. A borderless game may still cause opacity writes while the cursor moves through the distance range; the tray menu can pause updates and restore full opacity.
 
-Windows taskbar window classes, layering, and the acrylic composition API are implementation details, so a future Windows update can change behavior. If the acrylic API is unavailable, opacity control continues without the added blur. The app does not relocate taskbars or toggle Windows auto-hide.
+Windows taskbar window classes, layering, work area behavior, and the acrylic composition API are implementation details, so a future Windows update can change behavior. If the acrylic API is unavailable, opacity control continues without the added blur. The app does not relocate taskbars or toggle Windows auto-hide.
 
 
 ## Verification

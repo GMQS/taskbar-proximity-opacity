@@ -191,6 +191,7 @@ internal sealed class TaskbarController : IDisposable
     private readonly HashSet<nint> _idleTaskbars = [];
     private readonly Dictionary<nint, FadeTransition> _fadeTransitions = new();
     private readonly TaskbarBlur _blur = new();
+    private readonly WorkAreaManager _workAreas = new();
     private const int FadeDurationMilliseconds = 250;
     private bool _transparencyEnabled = TransparencyPreference.Read();
     private long _lastAppearanceScan = -1000;
@@ -215,6 +216,7 @@ internal sealed class TaskbarController : IDisposable
             _lastAppearanceScan = -1000;
             if (!value) return;
             _blur.Dispose();
+            _workAreas.RestoreAll();
             foreach (var state in _taskbars.Values)
             {
                 if (Native.IsWindow(state.Hwnd) && ApplyOpacity(state.Hwnd, 255, state.OriginalExStyle))
@@ -304,7 +306,9 @@ internal sealed class TaskbarController : IDisposable
                 if (progress >= 1) _fadeTransitions.Remove(hwnd);
             }
             if (target != current && ApplyOpacity(hwnd, target, state.OriginalExStyle)) _currentOpacity[hwnd] = target;
-            _blur.Apply(hwnd, state.Bounds, _currentOpacity.GetValueOrDefault(hwnd, current), enabled && _transparencyEnabled);
+            byte actualOpacity = _currentOpacity.GetValueOrDefault(hwnd, current);
+            _workAreas.Update(state.Display, state.Bounds, enabled && actualOpacity == 0);
+            _blur.Apply(hwnd, state.Bounds, actualOpacity, enabled && _transparencyEnabled);
         }
     }
 
@@ -370,6 +374,7 @@ internal sealed class TaskbarController : IDisposable
         foreach (var hwnd in _fadeTransitions.Keys.Where(hwnd => !found.ContainsKey(hwnd)).ToArray())
             _fadeTransitions.Remove(hwnd);
         _blur.Retain(found.Keys);
+        _workAreas.Retain(found.Values.Select(state => state.Display.DeviceName));
         if (addedTaskbar) SaveRecovery();
     }
 
@@ -453,6 +458,7 @@ internal sealed class TaskbarController : IDisposable
         _timer.Stop();
         _timer.Dispose();
         _blur.Dispose();
+        _workAreas.Dispose();
         foreach (var state in _taskbars.Values)
         {
             if (Native.IsWindow(state.Hwnd))
@@ -576,13 +582,16 @@ internal static class MonitorCatalog
 
 internal static class Native
 {
-    public const int GWL_EXSTYLE = -20;
+    public const int GWL_STYLE = -16, GWL_EXSTYLE = -20;
+    public const uint WS_CAPTION = 0x00C00000;
     public const uint WS_EX_LAYERED = 0x00080000;
     public const uint WS_EX_TRANSPARENT = 0x00000020;
     public const uint LWA_ALPHA = 0x00000002;
     public const uint LWA_COLORKEY = 0x00000001;
-    public const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020;
+    public const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_NOSENDCHANGING = 0x0400, SWP_ASYNCWINDOWPOS = 0x4000;
     public const uint MONITOR_DEFAULTTONEAREST = 2;
+    public const uint GW_OWNER = 4;
+    public const uint SPI_SETWORKAREA = 0x002F;
 
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
@@ -606,6 +615,10 @@ internal static class Native
     public static string GetClassName(nint hwnd) { var sb = new System.Text.StringBuilder(256); GetClassNameNative(hwnd, sb, sb.Capacity); return sb.ToString(); }
     [DllImport("user32.dll")] public static extern bool GetWindowRect(nint hwnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool IsWindow(nint hwnd);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(nint hwnd);
+    [DllImport("user32.dll")] public static extern bool IsIconic(nint hwnd);
+    [DllImport("user32.dll")] public static extern bool IsZoomed(nint hwnd);
+    [DllImport("user32.dll")] public static extern nint GetWindow(nint hwnd, uint command);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong32(nint hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr64(nint hwnd, int index);
     public static uint GetWindowLong(nint hwnd, int index) => IntPtr.Size == 8 ? unchecked((uint)GetWindowLongPtr64(hwnd, index).ToInt64()) : unchecked((uint)GetWindowLong32(hwnd, index));
@@ -619,4 +632,7 @@ internal static class Native
     [DllImport("user32.dll")] public static extern bool SetLayeredWindowAttributes(nint hwnd, uint colorKey, byte alpha, uint flags);
     [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(nint hwnd, out uint colorKey, out byte alpha, out uint flags);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(nint hwnd, nint after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(nint hwnd, int attribute, out RECT value, int size);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SystemParametersInfoW")]
+    public static extern bool SetWorkArea(uint action, uint parameter, ref RECT area, uint flags);
 }
