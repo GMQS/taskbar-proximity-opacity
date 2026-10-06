@@ -10,6 +10,13 @@ internal static class BlurChecks
         using var blur = new TaskbarBlur();
         nint hwnd = taskbar.Handle;
         uint originalStyle = Native.GetWindowLong(hwnd, Native.GWL_EXSTYLE);
+        uint staleStyle = originalStyle | Native.WS_EX_LAYERED | Native.WS_EX_TRANSPARENT;
+        check(TaskbarController.NormalizeOriginalStyle(staleStyle) == (originalStyle & ~(Native.WS_EX_LAYERED | Native.WS_EX_TRANSPARENT)), "Stale click-through baseline removes only utility styles");
+        check(TaskbarController.NormalizeOriginalStyle(0x88) == 0x88, "Normal Explorer styles are preserved");
+        check(TaskbarController.ApplyOpacity(hwnd, 0, staleStyle), "Taskbar can become fully transparent");
+        check((Native.GetWindowLong(hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TRANSPARENT) != 0, "Hidden taskbar passes clicks through");
+        check(TaskbarController.ApplyOpacity(hwnd, 128, staleStyle), "Taskbar becomes visible again");
+        check((Native.GetWindowLong(hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TRANSPARENT) == 0, "Visible taskbar accepts clicks despite stale original style");
         Native.GetLayeredWindowAttributes(hwnd, out _, out byte originalAlpha, out _);
         nint focus = GetForegroundWindow();
         blur.Apply(hwnd, taskbar.Bounds, 128, false);

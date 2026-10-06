@@ -344,6 +344,14 @@ internal sealed class TaskbarController : IDisposable
             nint monitor = Native.MonitorFromWindow(hwnd, Native.MONITOR_DEFAULTTONEAREST);
             if (!displays.TryGetValue(monitor, out var display)) return;
             uint exStyle = Native.GetWindowLong(hwnd, Native.GWL_EXSTYLE);
+            uint cleanStyle = NormalizeOriginalStyle(exStyle);
+            if (!_taskbars.ContainsKey(hwnd) && cleanStyle != exStyle)
+            {
+                // Older runs could capture our hidden, click-through state as
+                // the Explorer baseline. Repair it before recording originals.
+                Restore(hwnd, new RecoveryEntry { ExStyle = cleanStyle, Alpha = 255 });
+                exStyle = cleanStyle;
+            }
             bool layered = (exStyle & Native.WS_EX_LAYERED) != 0;
             byte alpha = 255;
             uint flags = 0;
@@ -373,15 +381,14 @@ internal sealed class TaskbarController : IDisposable
         if (addedTaskbar) SaveRecovery();
     }
 
-    private static bool ApplyOpacity(nint hwnd, byte alpha, uint originalExStyle)
+    internal static bool ApplyOpacity(nint hwnd, byte alpha, uint originalExStyle)
     {
         uint style = Native.GetWindowLong(hwnd, Native.GWL_EXSTYLE);
         style |= Native.WS_EX_LAYERED;
-        if ((originalExStyle & Native.WS_EX_TRANSPARENT) == 0)
-        {
-            if (alpha == 0) style |= Native.WS_EX_TRANSPARENT;
-            else style &= ~Native.WS_EX_TRANSPARENT;
-        }
+        // A visible taskbar must accept clicks even if an older recovery record
+        // incorrectly included our click-through flag in its original styles.
+        if (alpha == 0) style |= Native.WS_EX_TRANSPARENT;
+        else style &= ~Native.WS_EX_TRANSPARENT;
         Native.SetWindowLong(hwnd, Native.GWL_EXSTYLE, style);
         return Native.SetLayeredWindowAttributes(hwnd, 0, alpha, Native.LWA_ALPHA);
     }
@@ -424,6 +431,15 @@ internal sealed class TaskbarController : IDisposable
 
     private static void Restore(nint hwnd, RecoveryEntry state)
     {
+        uint cleanStyle = NormalizeOriginalStyle(state.ExStyle);
+        if (cleanStyle != state.ExStyle)
+        {
+            state.ExStyle = cleanStyle;
+            state.Layered = false;
+            state.Alpha = 255;
+            state.ColorKey = 0;
+            state.Flags = Native.LWA_ALPHA;
+        }
         Native.SetWindowLong(hwnd, Native.GWL_EXSTYLE, state.ExStyle);
         if (state.Layered)
             Native.SetLayeredWindowAttributes(hwnd, state.ColorKey, state.Alpha, state.Flags);
@@ -431,6 +447,12 @@ internal sealed class TaskbarController : IDisposable
             Native.SetLayeredWindowAttributes(hwnd, 0, 255, Native.LWA_ALPHA);
         Native.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
             Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE | Native.SWP_FRAMECHANGED);
+    }
+
+    internal static uint NormalizeOriginalStyle(uint style)
+    {
+        uint hiddenStyle = Native.WS_EX_LAYERED | Native.WS_EX_TRANSPARENT;
+        return (style & hiddenStyle) == hiddenStyle ? style & ~hiddenStyle : style;
     }
 
     private void SaveRecovery()
