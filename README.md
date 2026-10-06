@@ -1,42 +1,44 @@
 # Taskbar Proximity Opacity
 
-Windows taskbar opacity follows the mouse distance independently on each display. The taskbar stays in place; both its background and its contents (including icons) are faded as part of the taskbar window.
+マウスカーソルからの距離に応じて、Windowsのタスクバーの不透明度をモニターごとに調整するアプリです。タスクバーの位置はそのままで、背景とアイコンを含む内容全体をフェードさせます。
 
-## Current scope
+## 対応環境と機能
 
-- Windows 11, x64.
-- The standard primary and secondary Windows taskbars.
-- Independent calculations for every monitor that has a taskbar. Turn on **Show my taskbar on all displays** in Windows settings to have a taskbar on each display.
-- Settings window for distance range, cursor idle delay, per-display enable/disable, and optional startup.
-- Tray menu to pause or exit. A paused taskbar is restored to full opacity.
-- Follows **Windows Settings > Personalization > Colors > Transparency effects** without changing that setting. When ON, a native acrylic surface behind each enabled taskbar blurs the background while the taskbar remains visible; OFF keeps the existing opacity-only behavior. Changes are picked up within about one second, even with a stationary cursor. High contrast disables the added blur. Full transparency, pause, disabling a display, and exit remove the blur surface.
-- Settings live in `%LOCALAPPDATA%\TaskbarProximityOpacity\settings.json`.
+- Windows 11、x64に対応しています。
+- Windows標準のメインモニター・サブモニターのタスクバーを対象とします。
+- タスクバーがあるモニターごとに、不透明度を独立して計算します。各モニターにタスクバーを表示するには、Windowsの設定で「タスクバーをすべてのディスプレイに表示する」を有効にしてください。
+- 設定画面で、反応する距離の範囲、カーソル停止後の待ち時間、モニターごとの有効・無効、Windows起動時の自動起動を変更できます。
+- 通知領域のメニューから一時停止・終了できます。一時停止すると、タスクバーを完全に不透明な状態に戻します。
+- **Windowsの設定 > 個人用設定 > 色 > 透明効果**に従って動作し、この設定自体は変更しません。有効な場合は、表示中の各タスクバーの背後にWindowsのアクリル効果用のウィンドウを置き、背景をぼかします。無効な場合は、不透明度の調整だけを行います。設定の変更は、カーソルが停止していても約1秒以内に反映されます。ハイコントラスト使用時は追加のぼかしを無効にします。完全に透明になった場合、一時停止した場合、対象モニターを無効にした場合、アプリを終了した場合は、ぼかし用ウィンドウを取り除きます。
+- 設定は `%LOCALAPPDATA%\TaskbarProximityOpacity\settings.json` に保存します。
 
-The distance uses the shortest distance from the cursor to that monitor's taskbar rectangle. The distance range is a percentage of the display dimension perpendicular to the taskbar, so it scales with resolution and rotation. At or beyond the configured range, opacity is always zero. When the cursor stops anywhere in the range where the taskbar has nonzero opacity for the configured delay, that taskbar fades out over 250 ms. Moving the cursor again fades it back in over 250 ms to the opacity for its current position. Other distance-based opacity changes remain immediate. The calculation is independent for each display.
+距離は、カーソルからそのモニターのタスクバーの矩形までの最短距離です。反応する距離の範囲は、タスクバーに対して垂直な方向の画面サイズに対する割合で指定するため、解像度や画面の回転に応じて変わります。指定した範囲の境界および範囲外では、不透明度は常に0です。
 
-## Build and run
+タスクバーの不透明度が0より大きい範囲でカーソルが設定した時間だけ停止すると、そのタスクバーは250ミリ秒かけてフェードアウトします。カーソルを再び動かすと、現在位置に応じた不透明度まで250ミリ秒かけてフェードインします。それ以外の距離による不透明度の変化は即座に反映します。これらの処理はモニターごとに独立しています。
 
-Requires the .NET 10 Windows Desktop Runtime. Run this command to install the pinned .NET 10 SDK in this project (no administrator rights required) and build into `artifact`:
+## ビルドと起動
+
+実行には .NET 10 Windows Desktop Runtime が必要です。次のコマンドで、指定バージョンの .NET 10 SDKをプロジェクト内にインストールし、`artifact` にビルドできます。管理者権限は不要です。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-dotnet.ps1
 ```
 
-The SDK is installed in `.dotnet`. Run the script again for later builds; it closes a running copy from `artifact` before replacing the executable. You can also build directly when the app is not running:
+SDKは `.dotnet` にインストールします。以降のビルドでも同じスクリプトを実行してください。`artifact` のアプリが起動している場合は、終了させてから実行ファイルを更新します。アプリが起動していない場合は、直接ビルドすることもできます。
 
 ```powershell
 .\.dotnet\dotnet.exe build .\TaskbarProximityOpacity.csproj -c Release -o .\artifact
 ```
 
-Run `artifact\TaskbarProximityOpacity.exe`. To make a self-contained single-file package on a machine with NuGet access, publish to `artifact\publish`:
+`artifact\TaskbarProximityOpacity.exe` を実行して起動します。NuGetにアクセスできる環境で、ランタイムを同梱した単一ファイルのパッケージを作成するには、次のコマンドで `artifact\publish` に発行してください。
 
 ```powershell
 .\.dotnet\dotnet.exe publish .\TaskbarProximityOpacity.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\artifact\publish
 ```
 
-## Settings file
+## 設定ファイル
 
-The app creates its JSON settings after saving in the settings window. Distance and opacity values can also be changed by editing this file while the app is closed. `DisabledDisplays` contains Windows display device names (for example `\\.\DISPLAY2`). An empty list enables all detected displays.
+設定画面で保存すると、JSON形式の設定ファイルを作成します。アプリを終了した状態で、このファイルを直接編集して設定を変更することもできます。`DisabledDisplays` には、無効にするWindowsのディスプレイデバイス名（例：`\\.\DISPLAY2`）を指定します。空のリストの場合は、検出したすべてのモニターで有効になります。
 
 ```json
 {
@@ -47,19 +49,32 @@ The app creates its JSON settings after saving in the settings window. Distance 
 }
 ```
 
-`FadeDistanceRatio` is a fraction: `0.35` means 35% of the display dimension perpendicular to the taskbar. Values supported by the settings UI are 0.01–1.00. `IdleDelayMilliseconds` sets the stationary delay and can be changed in the settings window from 0.1 to 60 seconds. An older settings file may still contain `FarOpacityPercent`; the app ignores it and removes it the next time settings are saved.
+`FadeDistanceRatio` は反応する距離の割合です。`0.35` は、タスクバーに対して垂直な方向の画面サイズの35%を意味します。設定画面では0.01〜1.00の範囲で指定できます。`IdleDelayMilliseconds` はカーソル停止後の待ち時間をミリ秒で指定し、設定画面では0.1〜60秒の範囲で変更できます。`StartWithWindows` はWindows起動時の自動起動を指定します。古い設定ファイルに `FarOpacityPercent` が残っている場合、アプリはこの値を無視し、次回の設定保存時に削除します。
 
-## Install and remove
+## 導入と削除
 
-This is a portable tray utility; there is no installer. Keep the generated `.exe`, `.dll`, `.deps.json`, and `.runtimeconfig.json` together, then run it. Optional startup is managed from the settings window. To remove it, exit the app, turn off startup if enabled, then delete the app files and `%LOCALAPPDATA%\TaskbarProximityOpacity`. On normal exit the original taskbar window styles and opacity are restored. If the app is force-terminated, the next launch reads a recovery record and restores them. If you force-terminate it and will not launch it again, restart Windows Explorer before deleting the recovery data.
+インストーラーを使わない、通知領域に常駐するポータブルアプリです。ビルドで生成した `.exe`、`.dll`、`.deps.json`、`.runtimeconfig.json` を同じフォルダーに置いて実行してください。Windows起動時の自動起動は設定画面で変更できます。
 
-## Performance notes
+削除するには、自動起動が有効なら無効にして、アプリを終了してから、アプリのファイルと `%LOCALAPPDATA%\TaskbarProximityOpacity` を削除してください。通常の終了時には、タスクバーのウィンドウスタイルと不透明度を元に戻します。強制終了した場合は、次回起動時に復旧記録を読み込んで復元します。強制終了後にアプリを再び起動しない場合は、復旧データを削除する前にWindowsエクスプローラーを再起動してください。
 
-The utility samples the cursor every 30 ms and writes taskbar opacity only when the value changes. With transparency effects enabled, it creates one taskbar-sized acrylic surface immediately below each visible controlled taskbar. The surfaces do not activate or cover taskbar icons, and Windows handles the blur rendering. Acrylic cannot be alpha-faded with layered windows on Windows 11: blur strength is constant while the taskbar is visible and the surface is removed at zero opacity. A borderless game may still cause opacity writes while the cursor moves through the distance range; the tray menu can pause updates and restore full opacity.
+## 動作とパフォーマンス
 
-Windows taskbar window classes, layering, and the acrylic composition API are implementation details, so a future Windows update can change behavior. If the acrylic API is unavailable, opacity control continues without the added blur. The app does not relocate taskbars or toggle Windows auto-hide.
+カーソルの位置を30ミリ秒ごとに確認し、不透明度が変わった場合だけタスクバーを更新します。透明効果が有効な場合は、制御対象の表示中のタスクバーのすぐ背後に、タスクバーと同じ大きさのアクリル効果用ウィンドウを1つずつ配置します。このウィンドウはフォーカスを奪ったり、タスクバーのアイコンを覆ったりせず、ぼかしの描画はWindowsが処理します。
 
+Windows 11では、レイヤードウィンドウのアルファ値でアクリル効果をフェードさせることができません。そのため、タスクバーが表示されている間はぼかしの強さが一定で、不透明度が0になるとぼかし用ウィンドウを取り除きます。ボーダーレス表示のゲーム中でも、カーソルが反応範囲内を移動すると不透明度を更新することがあります。通知領域のメニューから一時停止すると、更新を止めてタスクバーを完全に不透明な状態に戻せます。
 
-## Verification
+タスクバーのウィンドウクラス、レイヤー処理、アクリル合成APIはWindows内部の実装に依存するため、今後のWindows更新で動作が変わる可能性があります。アクリル合成APIを利用できない場合も、追加のぼかしを使わずに不透明度の制御を継続します。タスクバーの位置や、Windowsのタスクバーの自動非表示設定は変更しません。
 
-Run `.\.dotnet\dotnet.exe run --project tests/Validation.csproj -c Release` on Windows to check blur surface lifecycle, placement, and focus. Use `-- --blur-demo` for a visual striped-background blur check (closes automatically after two minutes).
+## 動作確認
+
+Windowsで次のコマンドを実行すると、ぼかし用ウィンドウの作成・破棄、配置、フォーカス、およびタスクバーのクリック受付に関わる設定を検証できます。
+
+```powershell
+.\.dotnet\dotnet.exe run --project tests/Validation.csproj -c Release
+```
+
+縞模様の背景を使ってぼかしを目視確認するには、`-- --blur-demo` を追加してください。デモは2分後に自動で終了します。
+
+```powershell
+.\.dotnet\dotnet.exe run --project tests/Validation.csproj -c Release -- --blur-demo
+```
